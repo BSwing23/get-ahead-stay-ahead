@@ -1,78 +1,143 @@
-
 'use client'
-import { useMatchStore } from '@/store/useMatchStore'
-import { t } from '@/lib/i18n'
-import Link from 'next/link'
 
-export default function LivePage(){
-  const s = useMatchStore()
-  const leftIsMy = s.side === 'left'
-  const labelLeft = leftIsMy ? s.myName : s.oppName
-  const labelRight = leftIsMy ? s.oppName : s.myName
-  const scoreLeft = leftIsMy ? s.scoreMy : s.scoreOpp
-  const scoreRight = leftIsMy ? s.scoreOpp : s.scoreMy
-  const commit = (w:'my'|'opp')=> s.commitRally(w)
-  const zoneLabel = `Zone: ${s.convention==='International' ? `Z${s.currentRotation}` : s.currentRotation}`
+import React from 'react'
+import Link from 'next/link'
+import { useMatchStore } from '@/store/useMatchStore'
+
+// ---------- Real Points helper ----------
+type Rally = { winner: 'my' | 'opp'; serving: 'my' | 'opp' }
+function computeRealPoints(rallies: Rally[]) {
+  let my = 0, opp = 0
+  for (const r of rallies) {
+    if (r.winner === 'my'  && r.serving === 'my')  my++
+    if (r.winner === 'opp' && r.serving === 'opp') opp++
+  }
+  return { my, opp }
+}
+// ---------------------------------------
+
+export default function LivePage() {
+  // ===== SELECT FROM STORE (rename if your store uses different keys) =====
+  const scoreMy   = useMatchStore(s => (s as any).scoreMy ?? 0)
+  const scoreOpp  = useMatchStore(s => (s as any).scoreOpp ?? 0)
+  const serving   = useMatchStore(s => (s as any).servingTeam ?? 'my') as 'my' | 'opp'
+  const rotation  = useMatchStore(s => (s as any).currentRotation ?? 1)
+  const rallies   = useMatchStore(s => (s as any).rallies ?? []) as Rally[]
+
+  const pointMy   = useMatchStore(s => (s as any).pointMy   ?? (()=>{}))
+  const pointOpp  = useMatchStore(s => (s as any).pointOpp  ?? (()=>{}))
+  const undo      = useMatchStore(s => (s as any).undo      ?? (()=>{}))
+  const resetSet  = useMatchStore(s => (s as any).resetSet  ?? (()=>{}))
+  // =======================================================================
+
+  const { my: realMy, opp: realOpp } = computeRealPoints(rallies)
 
   return (
-    <main className="container col">
-      <div className="row">
-        <Link href="/setup" className="btn btn-ghost">← Setup</Link>
-        <Link href="/summary" className="btn btn-ghost">Summary →</Link>
-      </div>
-      <h1>{t('live_title', s.lang)}</h1>
+    <main style={{padding:'20px', maxWidth:960, margin:'0 auto'}}>
+      <header style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16}}>
+        <h1 style={{margin:0}}>Live</h1>
+        <nav style={{display:'flex', gap:12}}>
+          <Link href="/setup">Setup →</Link>
+          <Link href="/summary">Summary →</Link>
+        </nav>
+      </header>
 
-      <section className="card col">
-        <div className="grid-2">
-          <div className="col" style={{alignItems:'center'}}>
-            <div>{t('live_actual_score', s.lang)}</div>
-            <div style={{fontSize:48,fontWeight:800}}>{scoreLeft}</div>
-            <div className="pill">{labelLeft}</div>
+      {/* Scoreboard */}
+      <section
+        style={{
+          display:'grid',
+          gridTemplateColumns:'1fr auto 1fr',
+          gap:24,
+          alignItems:'center',
+          marginBottom:24
+        }}
+      >
+        {/* OPP side */}
+        <div style={{textAlign:'center'}}>
+          <div style={{fontSize:14, opacity:.7, marginBottom:6}}>Opp</div>
+          <div style={{fontSize:64, fontWeight:800, lineHeight:1}}>{scoreOpp}</div>
+          <div style={{fontSize:12, opacity:.7, marginTop:6}}>Real Pts: {realOpp}</div>
+        </div>
+
+        {/* Center info */}
+        <div style={{textAlign:'center'}}>
+          <div style={{fontSize:12, opacity:.7, marginBottom:4}}>Serving</div>
+          <div
+            style={{
+              fontSize:14,
+              fontWeight:700,
+              padding:'6px 10px',
+              borderRadius:999,
+              background: serving === 'my' ? '#d0ebff' : '#ffe3e3',
+              border:'1px solid rgba(0,0,0,.06)'
+            }}
+          >
+            {serving === 'my' ? 'My' : 'Opp'}
           </div>
-          <div className="col" style={{alignItems:'center'}}>
-            <div>{t('live_actual_score', s.lang)}</div>
-            <div style={{fontSize:48,fontWeight:800}}>{scoreRight}</div>
-            <div className="pill">{labelRight}</div>
-          </div>
+          <div style={{fontSize:12, opacity:.7, marginTop:8}}>Rotation: Z{rotation}</div>
         </div>
 
-        <div className="grid-2">
-          {leftIsMy ? (
-            <>
-              <button className="btn btn-primary" onClick={()=>commit('my')}>{s.myName} +1</button>
-              <button className="btn" onClick={()=>commit('opp')}>{s.oppName} +1</button>
-            </>
-          ) : (
-            <>
-              <button className="btn" onClick={()=>commit('opp')}>{s.oppName} +1</button>
-              <button className="btn btn-primary" onClick={()=>commit('my')}>{s.myName} +1</button>
-            </>
-          )}
-        </div>
-
-        <div className="row" style={{justifyContent:'center'}}>
-          <button className="btn" onClick={s.undoLast}>Undo Last</button>
-          <button className="btn" onClick={s.excludeLastForStats}>Exclude Last (stats only)</button>
-        </div>
-
-        <div className="row" style={{justifyContent:'center'}}>
-          <div className="pill">{zoneLabel}</div>
-          <div className="pill">Serving: {s.servingTeam==='my'? s.myName : s.oppName}</div>
-          <button className="btn" onClick={()=>s.resetSet()}>Reset Set</button>
-        </div>
-
-        <div className="card">
-          <div style={{fontWeight:600, marginBottom:8}}>Recent Rallies</div>
-          <ul style={{listStyle:'none',padding:0,margin:0}}>
-            {s.rallies.slice(-6).reverse().map(r=>(
-              <li key={r.id} className="row" style={{justifyContent:'space-between'}}>
-                <span>#{r.rallyNumber} — {r.winner==='my'?s.myName:s.oppName} {r.excludeFromStats?'(excluded)':''}</span>
-                <button className="btn" onClick={()=>s.toggleExcludeById(r.id)}>{r.excludeFromStats?'Include':'Exclude'}</button>
-              </li>
-            ))}
-          </ul>
+        {/* MY side */}
+        <div style={{textAlign:'center'}}>
+          <div style={{fontSize:14, opacity:.7, marginBottom:6}}>My</div>
+          <div style={{fontSize:64, fontWeight:800, lineHeight:1}}>{scoreMy}</div>
+          <div style={{fontSize:12, opacity:.7, marginTop:6}}>Real Pts: {realMy}</div>
         </div>
       </section>
+
+      {/* Buttons */}
+      <section style={{display:'flex', gap:12, justifyContent:'center', marginBottom:12}}>
+        <button
+          onClick={() => pointMy()}
+          style={{
+            padding:'14px 18px',
+            borderRadius:10,
+            border:'1px solid #d0d7de',
+            background:'#0d6efd',
+            color:'#fff',
+            fontWeight:700,
+            cursor:'pointer'
+          }}
+        >
+          My +1
+        </button>
+
+        <button
+          onClick={() => pointOpp()}
+          style={{
+            padding:'14px 18px',
+            borderRadius:10,
+            border:'1px solid #d0d7de',
+            background:'#dc3545',
+            color:'#fff',
+            fontWeight:700,
+            cursor:'pointer'
+          }}
+        >
+          Opp +1
+        </button>
+      </section>
+
+      {/* Utility row */}
+      <section style={{display:'flex', gap:12, justifyContent:'center'}}>
+        <button
+          onClick={() => undo()}
+          style={{padding:'10px 14px', borderRadius:8, border:'1px solid #d0d7de', background:'#fff', cursor:'pointer'}}
+        >
+          Undo
+        </button>
+        <button
+          onClick={() => resetSet()}
+          style={{padding:'10px 14px', borderRadius:8, border:'1px solid #d0d7de', background:'#fff', cursor:'pointer'}}
+        >
+          Reset Set
+        </button>
+      </section>
+
+      {/* Tiny debug/help */}
+      <div style={{marginTop:18, fontSize:12, opacity:.6, textAlign:'center'}}>
+        Real points = points won while serving.
+      </div>
     </main>
   )
 }
