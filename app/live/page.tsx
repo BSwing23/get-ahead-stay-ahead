@@ -6,8 +6,11 @@ import { useMatchStore } from '@/store/useMatchStore'
 
 // ---- Real Points helper (matches rally shape in your store) ----
 type Rally = {
+  id?: string
+  rallyNumber: number
   winner: 'my' | 'opp'
   servingTeamAtStart: 'my' | 'opp'
+  myRotationAtStart: 1|2|3|4|5|6
 }
 function computeRealPoints(rallies: Rally[]) {
   let my = 0, opp = 0
@@ -20,7 +23,7 @@ function computeRealPoints(rallies: Rally[]) {
 // ----------------------------------------------------------------
 
 export default function LivePage() {
-  // ===== Select from store (keys match our earlier builds) =====
+  // ===== Select from store (keys match earlier builds) =====
   const side         = useMatchStore(s => (s as any).side ?? 'left') as 'left' | 'right'
   const myName       = useMatchStore(s => (s as any).myName ?? 'My Team')
   const oppName      = useMatchStore(s => (s as any).oppName ?? 'Opponent')
@@ -35,7 +38,7 @@ export default function LivePage() {
   const excludeLast  = useMatchStore(s => (s as any).excludeLastForStats ?? (()=>{}))
   const resetSet     = useMatchStore(s => (s as any).resetSet ?? (()=>{}))
   const endSet       = useMatchStore(s => (s as any).endSetAndStartNext ?? (()=>{}))
-  // =============================================================
+  // =========================================================
 
   const { my: realMy, opp: realOpp } = computeRealPoints(rallies)
 
@@ -47,6 +50,9 @@ export default function LivePage() {
   const rightScore = leftIsMy ? scoreOpp : scoreMy
   const leftReal   = leftIsMy ? realMy : realOpp
   const rightReal  = leftIsMy ? realOpp : realMy
+
+  // Recent plays (last 8, newest first)
+  const recent = [...rallies].slice(-8).reverse()
 
   return (
     <main style={{padding:'20px', maxWidth:1100, margin:'0 auto'}}>
@@ -105,7 +111,6 @@ export default function LivePage() {
 
       {/* Buttons */}
       <section style={{display:'flex', gap:12, justifyContent:'center', marginBottom:12, flexWrap:'wrap'}}>
-        {/* Always commit in terms of my/opp so logic stays correct regardless of side */}
         <button
           onClick={() => commitRally('my')}
           style={{
@@ -163,6 +168,47 @@ export default function LivePage() {
         >
           End Set → Next
         </button>
+      </section>
+
+      {/* Recent Plays */}
+      <section style={{marginTop:20}}>
+        <h3 style={{margin:'8px 0'}}>Recent Plays</h3>
+        {recent.length === 0 ? (
+          <div style={{fontSize:13, opacity:.7}}>No rallies yet.</div>
+        ) : (
+          <ul style={{listStyle:'none', padding:0, margin:0, display:'grid', gap:8}}>
+            {recent.map(r => {
+              const whoWon = r.winner === 'my' ? myName : oppName
+              const serveTxt = r.servingTeamAtStart === 'my' ? `${myName} serve` : `${oppName} serve`
+              const zoneTxt = `Z${r.myRotationAtStart}`
+              const badgeColor = r.winner === 'my' ? '#dcfce7' : '#fee2e2'
+              const badgeText  = r.winner === 'my' ? 'MY POINT' : 'OPP POINT'
+              return (
+                <li key={r.id ?? r.rallyNumber}
+                    style={{
+                      display:'grid',
+                      gridTemplateColumns:'64px 1fr auto',
+                      alignItems:'center',
+                      gap:12,
+                      border:'1px solid #e5e7eb',
+                      borderRadius:10,
+                      padding:'8px 10px',
+                      background:'#fff'
+                    }}>
+                  <div style={{fontSize:12, opacity:.6}}>#{r.rallyNumber}</div>
+                  <div style={{fontSize:14}}>
+                    <span style={{padding:'2px 8px', background:badgeColor, borderRadius:999, marginRight:8, fontSize:12}}>
+                      {badgeText}
+                    </span>
+                    <span style={{opacity:.8}}>{whoWon}</span>
+                    <span style={{opacity:.6}}> • {serveTxt}</span>
+                  </div>
+                  <div style={{fontSize:12, opacity:.7}}>Zone: {zoneTxt}</div>
+                </li>
+              )
+            })}
+          </ul>
+        )}
       </section>
 
       <div style={{marginTop:18, fontSize:12, opacity:.6, textAlign:'center'}}>
