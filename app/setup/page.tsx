@@ -1,65 +1,102 @@
-
 'use client'
-import { useMatchStore } from '@/store/useMatchStore'
-import { t } from '@/lib/i18n'
-import Link from 'next/link'
 
-const langs = ['en','es','fr','pt','pt-BR','it','de','ja','zh'] as const
+import React from 'react'
+import { useMatchStore, Convention, Side, StartIn, Rot } from '@/store/useMatchStore'
+
+const LANGS = [
+  { code: 'en', label: 'English' },
+  { code: 'es', label: 'Español' },
+  { code: 'pt-BR', label: 'Português (Brasil)' },
+  { code: 'it', label: 'Italiano' },
+  { code: 'fr', label: 'Français' },
+  { code: 'de', label: 'Deutsch' },
+]
 
 export default function SetupPage(){
   const {
-    lang, setLang, convention, setConvention, side, setSide,
-    startRotationMy, setStartRotation, startIn, setStartIn,
-    myName, oppName, setMyName, setOppName
+    lang, setLang,
+    convention, setConvention,
+    side, setSide,
+    myName, oppName, setMyName, setOppName,
+    startRotationMy, setStartRotation,
+    startIn, setStartIn,
   } = useMatchStore()
-  const rotCaption = (n:number, conv:'International'|'American') => (conv==='International'?`Z${n}`:`${n}`)
+
   return (
-    <main className="container col">
-      <div className="row">
-        <Link href="/" className="btn btn-ghost">← Home</Link>
+    <main style={{padding:'20px', maxWidth:1100, margin:'0 auto'}}>
+      <div style={{display:'flex', gap:12, justifyContent:'flex-end', marginBottom:8}}>
+        <a href="/setup" style={{fontWeight:700}}>Setup</a>
+        <a href="/live">Live</a>
+        <a href="/summary">Summary</a>
+        <a href="/season">Season</a>
       </div>
-      <h1>{t('live_title', lang)}</h1>
 
-      <section className="card col">
-        <label>{t('setup_language', lang)}</label>
-        <select value={lang} onChange={e=>setLang(e.target.value as any)}>
-          {langs.map(code=> <option key={code} value={code}>{code}</option>)}
+      <h1 style={{marginTop:0}}>Setup</h1>
+
+      {/* Language */}
+      <section className="card" style={card}>
+        <h3>Language</h3>
+        <select value={lang} onChange={e=>setLang(e.target.value)} style={input}>
+          {LANGS.map(l=> <option key={l.code} value={l.code}>{l.label}</option>)}
         </select>
+      </section>
 
-        <label>{t('setup_convention', lang)}</label>
-        <select value={convention} onChange={e=>setConvention(e.target.value as any)}>
-          <option value="International">International</option>
-          <option value="American">American</option>
-        </select>
-
-        <label>{t('setup_scoreboard_side', lang)}</label>
-        <div className="row">
-          <button className={"btn "+(side==='left'?'btn-primary':'btn-ghost')} onClick={()=>setSide('left')}>←</button>
-          <button className={"btn "+(side==='right'?'btn-primary':'btn-ghost')} onClick={()=>setSide('right')}>→</button>
+      {/* Names */}
+      <section className="card" style={card}>
+        <h3>Team Names</h3>
+        <div style={row}>
+          <label style={label}>My team</label>
+          <input value={myName} onChange={e=>setMyName(e.target.value)} style={input} />
         </div>
-
-        <label>{t('setup_my_name', lang)}</label>
-        <input className="btn-ghost" style={{padding:'8px',borderRadius:8,border:'1px solid #e5e7eb'}} value={myName} onChange={e=>setMyName(e.target.value)} />
-
-        <label>{t('setup_opp_name', lang)}</label>
-        <input className="btn-ghost" style={{padding:'8px',borderRadius:8,border:'1px solid #e5e7eb'}} value={oppName} onChange={e=>setOppName(e.target.value)} />
-
-        <label>{t('setup_start_rotation', lang)}</label>
-        <select value={startRotationMy} onChange={e=>setStartRotation(parseInt(e.target.value) as any)}>
-          {[1,2,3,4,5,6].map(n=> <option key={n} value={n}>{rotCaption(n, convention)}</option>)}
-        </select>
-
-        <label>{t('setup_first_serving', lang)}</label>
-        <div className="row">
-          <button className={"btn "+(startIn==='serve'?'btn-primary':'btn-ghost')} onClick={()=>setStartIn('serve')}>Serve</button>
-          <button className={"btn "+(startIn==='receive'?'btn-primary':'btn-ghost')} onClick={()=>setStartIn('receive')}>Receive</button>
+        <div style={row}>
+          <label style={label}>Opponent</label>
+          <input value={oppName} onChange={e=>setOppName(e.target.value)} style={input} />
         </div>
       </section>
 
-      <div className="row">
-        <Link href="/live" className="btn btn-primary">Go to Live</Link>
-        <Link href="/summary" className="btn btn-ghost">Summary</Link>
-      </div>
+      {/* Convention / Side */}
+      <section className="card" style={card}>
+        <h3>Display</h3>
+        <div style={row}>
+          <label style={label}>Rotation convention</label>
+          <select value={convention} onChange={e=>setConvention(e.target.value as Convention)} style={input}>
+            <option value="american">American (1–6)</option>
+            <option value="international">International (Z1–Z6)</option>
+          </select>
+        </div>
+        <div style={row}>
+          <label style={label}>Scoreboard side</label>
+          <select value={side} onChange={e=>setSide(e.target.value as Side)} style={input}>
+            <option value="left">My score on Left</option>
+            <option value="right">My score on Right</option>
+          </select>
+        </div>
+      </section>
+
+      {/* Start settings */}
+      <section className="card" style={card}>
+        <h3>Starting Settings</h3>
+        <div style={row}>
+          <label style={label}>Start in</label>
+          <select value={startIn} onChange={e=>setStartIn(e.target.value as StartIn)} style={input}>
+            <option value="serve">Serving</option>
+            <option value="receive">Receiving</option>
+          </select>
+        </div>
+        <div style={row}>
+          <label style={label}>My starting rotation</label>
+          <select value={startRotationMy} onChange={e=>setStartRotation(parseInt(e.target.value) as Rot)} style={input}>
+            <option value={1}>1</option><option value={2}>2</option><option value={3}>3</option>
+            <option value={4}>4</option><option value={5}>5</option><option value={6}>6</option>
+          </select>
+        </div>
+      </section>
     </main>
   )
 }
+
+/* quick inline styles */
+const card: React.CSSProperties = { padding:'16px', border:'1px solid #e5e7eb', borderRadius:12, marginTop:16 }
+const row: React.CSSProperties = { display:'grid', gridTemplateColumns:'180px 1fr', gap:12, alignItems:'center', marginTop:8 }
+const label: React.CSSProperties = { opacity:.8 }
+const input: React.CSSProperties = { padding:'8px 10px', border:'1px solid #d1d5db', borderRadius:8 }
