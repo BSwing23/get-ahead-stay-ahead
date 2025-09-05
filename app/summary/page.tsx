@@ -1,62 +1,57 @@
-
 'use client'
-import { useMatchStore, Rot } from '@/store/useMatchStore'
-import { t } from '@/lib/i18n'
-import Link from 'next/link'
 
-export default function SummaryPage(){
+import React from 'react'
+import { useMatchStore, computeStats, Rot } from '@/store/useMatchStore'
+
+export default function SummaryPage() {
   const s = useMatchStore()
-  const stats = s.stats()
-  const rows = ([1,2,3,4,5,6] as Rot[]).map(rot=>{
-    const st = stats[rot]
-    const psPct = st.serves ? st.ps : 0
-    const soPct = st.receiveAttempts ? st.so : 0
-    const psso = psPct + soPct
-    const winning = psso >= 1
-    return {rot, serves:st.serves, realpts:(st.ps*st.serves), psPct, rec:st.receiveAttempts, soCnt:(st.so*st.receiveAttempts), soPct, psso, winning}
+  const { byRot } = computeStats(s.rallies)
+
+  const rows = ([1,2,3,4,5,6] as Rot[]).map(rot => {
+    const st = byRot[rot]
+    const psPct = st.serves ? (st.ps).toFixed(3) : "0.000"
+    const soPct = st.receives ? (st.so).toFixed(3) : "0.000"
+    const win = st.ps + st.so > 1 ? "Winning" : "Losing"
+    return { rot, serves:st.serves, receives:st.receives, psPct, soPct, win }
   })
+
   return (
-    <main className="container col">
-      <div className="row">
-        <Link className="btn btn-ghost" href="/live">← Live</Link>
+    <main style={{padding:'20px', maxWidth:1100, margin:'0 auto'}}>
+      <div style={{display:'flex', gap:12, justifyContent:'flex-end', marginBottom:8}}>
+        <a href="/setup">Setup</a>
+        <a href="/live">Live</a>
+        <a href="/summary" style={{fontWeight:700}}>Summary</a>
+        <a href="/season">Season</a>
       </div>
-      <h1>{t('summary_title', s.lang)}</h1>
-      <section className="card" style={{overflowX:'auto'}}>
-        <table style={{width:'100%', fontSize:14}}>
-          <thead>
-            <tr>
-              <th>{s.convention==='International' ? 'Zone (Z)' : t('summary_rotation', s.lang)}</th>
-              <th>{t('summary_serves', s.lang)}</th>
-              <th>{t('summary_realpts', s.lang)}</th>
-              <th>{t('summary_ps_pct', s.lang)}</th>
-              <th>{t('summary_receives', s.lang)}</th>
-              <th>{t('summary_sideouts', s.lang)}</th>
-              <th>{t('summary_so_pct', s.lang)}</th>
-              <th>{t('summary_psso_pct', s.lang)}</th>
-              <th>{t('summary_winning_label', s.lang)}</th>
+
+      <h1>Summary — Set {s.currentSet}</h1>
+
+      <table style={{width:'100%', borderCollapse:'collapse'}}>
+        <thead>
+          <tr>
+            <th>Zone (Z)</th>
+            <th>Serves</th>
+            <th>Receives</th>
+            <th>PS%</th>
+            <th>SO%</th>
+            <th>PS%+SO%</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r=>(
+            <tr key={r.rot}>
+              <td>Z{r.rot}</td>
+              <td>{r.serves}</td>
+              <td>{r.receives}</td>
+              <td>{r.psPct}</td>
+              <td>{r.soPct}</td>
+              <td>{(parseFloat(r.psPct)+parseFloat(r.soPct)).toFixed(3)}</td>
+              <td>{r.win}</td>
             </tr>
-          </thead>
-          <tbody>
-            {rows.map(r=> (
-              <tr key={r.rot}>
-                <td>{s.convention==='International'?`Z${r.rot}`:r.rot}</td>
-                <td>{r.serves}</td>
-                <td>{r.realpts.toFixed(0)}</td>
-                <td>{r.psPct.toFixed(3)}</td>
-                <td>{r.rec}</td>
-                <td>{r.soCnt.toFixed(0)}</td>
-                <td>{r.soPct.toFixed(3)}</td>
-                <td>{r.psso.toFixed(3)}</td>
-                <td>
-                  <span className="pill" style={{background:r.winning?'#ecfdf5':'#fee2e2',color:r.winning?'#065f46':'#991b1b'}}>
-                    {r.winning ? t('summary_winning', s.lang) : t('summary_losing', s.lang)}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
+          ))}
+        </tbody>
+      </table>
     </main>
   )
 }
