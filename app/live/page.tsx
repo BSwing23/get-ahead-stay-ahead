@@ -2,154 +2,177 @@
 
 import React, { useMemo } from 'react';
 import Link from 'next/link';
-import useMatchStore from '@/store/useMatchStore'; // path alias '@' -> project root
+import { useMatchStore } from '@/store/useMatchStore'; // ✅ named import (no default)
 
 // ---- Win probability (50/50 rallies), win-by-2, target = 25 or 15 ----
-function winProb(a: number, b: number, target: number, memo = new Map<string, number>()): number {
-  // Terminal: someone already won
-  if (a >= target && a - b >= 2) return 1;
-  if (b >= target && b - a >= 2) return 0;
+function winProb(
+  a: number,
+  b: number,
+  target: number,
+  memo = new Map<string, number>()
+): number {
+  const key = `${a},${b},${target}`;
+  const hit = memo.get(key);
+  if (hit !== undefined) return hit;
 
-  // Deuce region shortcut (both near target): for p=0.5 this is exact
-  if (a >= target - 1 && b >= target - 1) {
-    if (a === b) return 0.5;        // tied at deuce-ish
-    if (a === b + 1) return 0.75;   // up 1
-    if (b === a + 1) return 0.25;   // down 1
+  // Already won?
+  if (a >= target && a - b >= 2) {
+    memo.set(key, 1);
+    return 1;
+  }
+  if (b >= target && b - a >= 2) {
+    memo.set(key, 0);
+    return 0;
   }
 
-  const key = `${a},${b},${target}`;
-  if (memo.has(key)) return memo.get(key)!;
-
-  // Next rally is 50/50: average of win/lose branches
-  const p = 0.5 * (winProb(a + 1, b, target, memo) + winProb(a, b + 1, target, memo));
+  // One rally each side with 50/50 chance
+  const p = 0.5 * winProb(a + 1, b, target, memo) + 0.5 * winProb(a, b + 1, target, memo);
   memo.set(key, p);
   return p;
 }
 
 export default function LivePage() {
-  // use 'any' to avoid strict type mismatches across builds
-  const s: any = useMatchStore();
+  // Read store as any to be resilient to type changes between builds
+  const s = useMatchStore() as any;
 
-  // Scores (fallbacks so the page never crashes)
-  const my = (s?.realMy ?? s?.scoreMy ?? 0) as number;
-  const opp = (s?.realOpp ?? s?.scoreOpp ?? 0) as number;
+  const myName: string = s?.myName ?? 'My';
+  const oppName: string = s?.oppName ?? 'Opp';
+  const scoreMy: number = s?.scoreMy ?? 0;
+  const scoreOpp: number = s?.scoreOpp ?? 0;
+  const target: number = s?.target ?? 25; // 25 for regular sets, 15 for deciding
+  const sideLabel: string = s?.side ? (s.side === 'left' ? 'Left' : 'Right') : '';
 
-  // Names
-  const myName = (s?.myName ?? 'My') as string;
-  const oppName = (s?.oppName ?? 'Opp') as string;
-
-  // Target: 25 by default, 15 if deciding (or if store provides a target)
-  const target: number = (s?.target ?? (s?.isDecidingSet ? 15 : 25)) as number;
-
-  // Win probability now, and if the next rally is won/lost
-  const { pNow, pIfWin, pIfLose } = useMemo(() => {
-    const pNow = winProb(my, opp, target);
-    const pIfWin = winProb(my + 1, opp, target);
-    const pIfLose = winProb(my, opp + 1, target);
-    return { pNow, pIfWin, pIfLose };
-  }, [my, opp, target]);
-
-  // Button handlers (work with either commitRally or winRally naming)
-  const commit = (who: 'my' | 'opp') => {
-    if (typeof s?.commitRally === 'function') s.commitRally(who);
-    else if (typeof s?.winRally === 'function') s.winRally(who);
+  // ---- buttons (robust to differing method names in store) ----
+  const addMy = () => {
+    if (typeof s?.commitRally === 'function') return s.commitRally({ winner: 'my' });
+    if (typeof s?.myPlusOne === 'function') return s.myPlusOne();
+    if (typeof s?.addMy === 'function') return s.addMy();
+  };
+  const addOpp = () => {
+    if (typeof s?.commitRally === 'function') return s.commitRally({ winner: 'opp' });
+    if (typeof s?.oppPlusOne === 'function') return s.oppPlusOne();
+    if (typeof s?.addOpp === 'function') return s.addOpp();
+  };
+  const resetSet = () => {
+    if (typeof s?.resetSet === 'function') return s.resetSet();
+    if (typeof s?.hardReset === 'function') return s.hardReset();
   };
 
-  const endSet = () => {
-    if (typeof s?.endSet === 'function') s.endSet();
-    // route to Summary as a fallback
-    if (typeof window !== 'undefined') window.location.href = '/summary';
-  };
-
-  const pill: React.CSSProperties = {
-    padding: '8px 14px',
-    borderRadius: 999,
-    fontWeight: 700,
-    display: 'inline-block',
-    minWidth: 56,
-    textAlign: 'center',
-  };
+  // Chance to win *current* set from current score
+  const pNow = useMemo(() => winProb(scoreMy, scoreOpp, target), [scoreMy, scoreOpp, target]);
+  // If we win/lose the next rally, how does it change?
+  const pIfWin = useMemo(() => winProb(scoreMy + 1, scoreOpp, target), [scoreMy, scoreOpp, target]);
+  const pIfLose = useMemo(() => winProb(scoreMy, scoreOpp + 1, target), [scoreMy, scoreOpp, target]);
 
   return (
-    <div style={{ maxWidth: 960, margin: '0 auto', padding: 16 }}>
-      {/* simple top nav */}
-      <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginBottom: 12 }}>
+    <div style={{ padding: 16, maxWidth: 1200, margin: '0 auto', fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif' }}>
+      {/* Top nav */}
+      <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
         <Link href="/setup">Setup</Link>
-        <Link href="/live">Live</Link>
         <Link href="/summary">Summary</Link>
+        <Link href="/live" aria-current="page" style={{ fontWeight: 700 }}>Live</Link>
         <Link href="/season">Season</Link>
+        <div style={{ marginLeft: 'auto', opacity: 0.6 }}>Side: {sideLabel}</div>
       </div>
 
-      <h1 style={{ marginBottom: 8 }}>Live</h1>
-
-      {/* Scoreboards */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'center' }}>
-        <div style={{ border: '1px solid #eee', borderRadius: 12, padding: 16 }}>
+      {/* Scores */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', gap: 24, marginTop: 12 }}>
+        <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 14, opacity: 0.7 }}>{oppName}</div>
-          <div style={{ fontSize: 64, fontWeight: 800, lineHeight: 1 }}>{opp}</div>
+          <div style={{ fontSize: 64, fontWeight: 800 }}>{scoreOpp}</div>
         </div>
-        <div style={{ border: '1px solid #eee', borderRadius: 12, padding: 16 }}>
-          <div style={{ fontSize: 14, opacity: 0.7, textAlign: 'right' }}>{myName}</div>
-          <div style={{ fontSize: 64, fontWeight: 800, lineHeight: 1, textAlign: 'right' }}>{my}</div>
+
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 12, opacity: 0.6 }}>Target: {target} (win by 2)</div>
+          <div style={{ marginTop: 8 }}>
+            <button
+              onClick={addMy}
+              style={{
+                padding: '12px 20px',
+                fontWeight: 700,
+                borderRadius: 10,
+                border: '1px solid #ccd',
+                cursor: 'pointer',
+                marginRight: 8
+              }}
+            >
+              {myName} +1
+            </button>
+            <button
+              onClick={addOpp}
+              style={{
+                padding: '12px 20px',
+                fontWeight: 700,
+                borderRadius: 10,
+                border: '1px solid #ccd',
+                cursor: 'pointer',
+                background: '#f44',
+                color: 'white'
+              }}
+            >
+              {oppName} +1
+            </button>
+          </div>
+          <div style={{ marginTop: 8 }}>
+            <button
+              onClick={resetSet}
+              style={{
+                padding: '8px 14px',
+                borderRadius: 8,
+                border: '1px solid #ccd',
+                background: '#f6f7fb',
+                cursor: 'pointer'
+              }}
+            >
+              Reset Set
+            </button>
+          </div>
+        </div>
+
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 14, opacity: 0.7 }}>{myName}</div>
+          <div style={{ fontSize: 64, fontWeight: 800 }}>{scoreMy}</div>
         </div>
       </div>
 
-      {/* Buttons */}
-      <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 16 }}>
-        <button
-          onClick={() => commit('my')}
-          style={{ ...pill, background: '#2563eb', color: 'white' }}
-          aria-label={`${myName} won rally`}
-        >
-          {myName} +1
-        </button>
-        <button
-          onClick={() => commit('opp')}
-          style={{ ...pill, background: '#ef4444', color: 'white' }}
-          aria-label={`${oppName} won rally`}
-        >
-          {oppName} +1
-        </button>
-        <button onClick={endSet} style={{ ...pill, background: '#e5e7eb', color: '#111827' }}>
-          End Set → Summary
-        </button>
-      </div>
-
-      {/* Win probability panel */}
+      {/* Win probability block */}
       <div
         style={{
-          marginTop: 20,
-          border: '1px solid #eee',
-          borderRadius: 12,
-          padding: 16,
+          marginTop: 24,
           display: 'grid',
           gridTemplateColumns: '1fr 1fr 1fr',
-          gap: 12,
-          alignItems: 'center',
+          gap: 16
         }}
       >
-        <div>
-          <div style={{ fontSize: 12, opacity: 0.7 }}>Win odds now</div>
-          <div style={{ fontSize: 28, fontWeight: 800 }}>{Math.round(pNow * 100)}%</div>
+        <div className="card" style={{ padding: 16, border: '1px solid #eee', borderRadius: 12 }}>
+          <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>Chance to win (now)</div>
+          <div style={{ fontSize: 28, fontWeight: 800 }}>{(pNow * 100).toFixed(1)}%</div>
         </div>
-        <div>
-          <div style={{ fontSize: 12, opacity: 0.7 }}>If we win next</div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: '#065f46' }}>
-            {Math.round(pIfWin * 100)}%
+        <div className="card" style={{ padding: 16, border: '1px solid #eee', borderRadius: 12 }}>
+          <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>If we win next point</div>
+          <div style={{ fontSize: 28, fontWeight: 800 }}>{(pIfWin * 100).toFixed(1)}%</div>
+          <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>
+            Δ {( (pIfWin - pNow) * 100 ).toFixed(1)} pts
           </div>
         </div>
-        <div>
-          <div style={{ fontSize: 12, opacity: 0.7 }}>If we lose next</div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: '#7f1d1d' }}>
-            {Math.round(pIfLose * 100)}%
+        <div className="card" style={{ padding: 16, border: '1px solid #eee', borderRadius: 12 }}>
+          <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>If we lose next point</div>
+          <div style={{ fontSize: 28, fontWeight: 800 }}>{(pIfLose * 100).toFixed(1)}%</div>
+          <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>
+            Δ {( (pIfLose - pNow) * 100 ).toFixed(1)} pts
           </div>
         </div>
       </div>
 
-      {/* Context details */}
-      <div style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
-        Target: {target} (win by 2) • Assumes 50/50 rallies for quick live odds.
-      </div>
+      {/* Last rally summary if your store exposes it */}
+      {Array.isArray(s?.rallies) && s.rallies.length > 0 && (
+        <div style={{ marginTop: 24, opacity: 0.8 }}>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>Last Rally</div>
+          <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, background: '#fafafa', padding: 12, borderRadius: 8, border: '1px solid #eee' }}>
+            {JSON.stringify(s.rallies[s.rallies.length - 1], null, 2)}
+          </pre>
+        </div>
+      )}
     </div>
   );
 }
