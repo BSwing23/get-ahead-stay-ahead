@@ -2,177 +2,190 @@
 
 import React, { useMemo } from 'react';
 import Link from 'next/link';
-import { useMatchStore } from '@/store/useMatchStore'; // ✅ named import (no default)
+import { useMatchStore, Rot, computeStats } from '@/store/useMatchStore';
 
-// ---- Win probability (50/50 rallies), win-by-2, target = 25 or 15 ----
+// Tell Next not to prerender or cache this route
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+const pill: React.CSSProperties = {
+  display: 'inline-block',
+  padding: '6px 10px',
+  borderRadius: 999,
+  background: '#eef2ff',
+  fontWeight: 700,
+};
+
+function labelRot(r: Rot) {
+  return `Z${r}`;
+}
+
+/** Win probability for 50/50 rallies, win-by-2, target points. */
 function winProb(
   a: number,
   b: number,
   target: number,
-  memo = new Map<string, number>()
+  memo: Map<string, number>
 ): number {
+  // Base cases
+  if (a >= target && a - b >= 2) return 1;
+  if (b >= target && b - a >= 2) return 0;
+
   const key = `${a},${b},${target}`;
   const hit = memo.get(key);
   if (hit !== undefined) return hit;
 
-  // Already won?
-  if (a >= target && a - b >= 2) {
-    memo.set(key, 1);
-    return 1;
-  }
-  if (b >= target && b - a >= 2) {
-    memo.set(key, 0);
-    return 0;
-  }
+  // Recurse one rally ahead: 50/50 next rally
+  // Guarantee progress by increasing either a or b
+  const p =
+    0.5 * winProb(a + 1, b, target, memo) +
+    0.5 * winProb(a, b + 1, target, memo);
 
-  // One rally each side with 50/50 chance
-  const p = 0.5 * winProb(a + 1, b, target, memo) + 0.5 * winProb(a, b + 1, target, memo);
   memo.set(key, p);
   return p;
 }
 
 export default function LivePage() {
-  // Read store as any to be resilient to type changes between builds
-  const s = useMatchStore() as any;
+  const s = useMatchStore();
 
-  const myName: string = s?.myName ?? 'My';
-  const oppName: string = s?.oppName ?? 'Opp';
-  const scoreMy: number = s?.scoreMy ?? 0;
-  const scoreOpp: number = s?.scoreOpp ?? 0;
-  const target: number = s?.target ?? 25; // 25 for regular sets, 15 for deciding
-  const sideLabel: string = s?.side ? (s.side === 'left' ? 'Left' : 'Right') : '';
+  // Compute live stats for the current set
+  const { byRot, laps, extras } = useMemo(
+    () => computeStats(s.rallies),
+    [s.rallies]
+  );
 
-  // ---- buttons (robust to differing method names in store) ----
-  const addMy = () => {
-    if (typeof s?.commitRally === 'function') return s.commitRally({ winner: 'my' });
-    if (typeof s?.myPlusOne === 'function') return s.myPlusOne();
-    if (typeof s?.addMy === 'function') return s.addMy();
-  };
-  const addOpp = () => {
-    if (typeof s?.commitRally === 'function') return s.commitRally({ winner: 'opp' });
-    if (typeof s?.oppPlusOne === 'function') return s.oppPlusOne();
-    if (typeof s?.addOpp === 'function') return s.addOpp();
-  };
-  const resetSet = () => {
-    if (typeof s?.resetSet === 'function') return s.resetSet();
-    if (typeof s?.hardReset === 'function') return s.hardReset();
-  };
+  // Simple per-rotation PS/SO, plus “winning?” flag
+  const rows = ([
+    1, 2, 3, 4, 5, 6,
+  ] as Rot[]).map((rot) => {
+    const st =
+      byRot[rot] ?? { serves: 0, receives: 0, ps: 0, so: 0 };
+    const psPct = st.serves ? st.ps / st.serves : 0;
+    const soPct = st.receives ? st.so / st.receives : 0;
+    return {
+      rot,
+      serves: st.serves,
+      realPts: st.ps,
+      psPct,
+      receives: st.receives,
+      sideouts: st.so,
+      soPct,
+      sumPct: psPct + soPct,
+      winning: psPct + soPct >= 1,
+    };
+  });
 
-  // Chance to win *current* set from current score
-  const pNow = useMemo(() => winProb(scoreMy, scoreOpp, target), [scoreMy, scoreOpp, target]);
-  // If we win/lose the next rally, how does it change?
-  const pIfWin = useMemo(() => winProb(scoreMy + 1, scoreOpp, target), [scoreMy, scoreOpp, target]);
-  const pIfLose = useMemo(() => winProb(scoreMy, scoreOpp + 1, target), [scoreMy, scoreOpp, target]);
+  // “Chance to win next rally” deltas (optional, lightweight)
+  const chance = useMemo(() => {
+    const memo = new Map<string, number>();
+    const target = s.target; // 25 or 15
+    const pNow = winProb(s.realMy, s.realOpp, target, memo);
+    const pIfWin = winProb(s.realMy + 1, s.realOpp, target, memo);
+    const pIfLose = winProb(s.realMy, s.realOpp + 1, target, memo);
+    return {
+      now: pNow,
+      deltaWin: pIfWin - pNow,
+      deltaLose: pIfLose - pNow,
+    };
+  }, [s.realMy, s.realOpp, s.target]);
+
+  // Buttons wire to commitRally just like before
+  const addMy = () => s.commitRally({ winner: 'my' });
+  const addOpp = () => s.commitRally({ winner: 'opp' });
 
   return (
-    <div style={{ padding: 16, maxWidth: 1200, margin: '0 auto', fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif' }}>
+    <div style={{ padding: 16, maxWidth: 1000, margin: '0 auto' }}>
       {/* Top nav */}
-      <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
         <Link href="/setup">Setup</Link>
+        <b>Live</b>
         <Link href="/summary">Summary</Link>
-        <Link href="/live" aria-current="page" style={{ fontWeight: 700 }}>Live</Link>
         <Link href="/season">Season</Link>
-        <div style={{ marginLeft: 'auto', opacity: 0.6 }}>Side: {sideLabel}</div>
       </div>
 
-      {/* Scores */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', gap: 24, marginTop: 12 }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 14, opacity: 0.7 }}>{oppName}</div>
-          <div style={{ fontSize: 64, fontWeight: 800 }}>{scoreOpp}</div>
-        </div>
+      <h1>Live — Set {s.currentSet}</h1>
 
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 12, opacity: 0.6 }}>Target: {target} (win by 2)</div>
-          <div style={{ marginTop: 8 }}>
-            <button
-              onClick={addMy}
-              style={{
-                padding: '12px 20px',
-                fontWeight: 700,
-                borderRadius: 10,
-                border: '1px solid #ccd',
-                cursor: 'pointer',
-                marginRight: 8
-              }}
-            >
-              {myName} +1
-            </button>
-            <button
-              onClick={addOpp}
-              style={{
-                padding: '12px 20px',
-                fontWeight: 700,
-                borderRadius: 10,
-                border: '1px solid #ccd',
-                cursor: 'pointer',
-                background: '#f44',
-                color: 'white'
-              }}
-            >
-              {oppName} +1
-            </button>
-          </div>
-          <div style={{ marginTop: 8 }}>
-            <button
-              onClick={resetSet}
-              style={{
-                padding: '8px 14px',
-                borderRadius: 8,
-                border: '1px solid #ccd',
-                background: '#f6f7fb',
-                cursor: 'pointer'
-              }}
-            >
-              Reset Set
-            </button>
-          </div>
+      {/* Scoreboard */}
+      <div style={{ display: 'flex', gap: 24, alignItems: 'center', marginBottom: 12 }}>
+        <div>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>Actual Score</div>
+          <div style={{ fontSize: 48, fontWeight: 800 }}>{s.scoreOpp}</div>
+          <div style={{ opacity: 0.7 }}>{s.oppName || 'Opp'}</div>
         </div>
-
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 14, opacity: 0.7 }}>{myName}</div>
-          <div style={{ fontSize: 64, fontWeight: 800 }}>{scoreMy}</div>
+        <div style={{ width: 20 }} />
+        <div>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>Actual Score</div>
+          <div style={{ fontSize: 48, fontWeight: 800 }}>{s.scoreMy}</div>
+          <div style={{ opacity: 0.7 }}>{s.myName || 'My'}</div>
         </div>
       </div>
 
-      {/* Win probability block */}
-      <div
-        style={{
-          marginTop: 24,
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr 1fr',
-          gap: 16
-        }}
-      >
-        <div className="card" style={{ padding: 16, border: '1px solid #eee', borderRadius: 12 }}>
-          <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>Chance to win (now)</div>
-          <div style={{ fontSize: 28, fontWeight: 800 }}>{(pNow * 100).toFixed(1)}%</div>
+      {/* Big buttons */}
+      <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+        <button onClick={addMy} style={{ padding: '12px 18px', fontWeight: 700, background: '#3b82f6', color: '#fff', borderRadius: 12, border: 'none' }}>
+          My +1
+        </button>
+        <button onClick={addOpp} style={{ padding: '12px 18px', fontWeight: 700, background: '#ef4444', color: '#fff', borderRadius: 12, border: 'none' }}>
+          Opp +1
+        </button>
+        <button onClick={s.resetSet} style={{ padding: '12px 18px', borderRadius: 12 }}>
+          Reset Set
+        </button>
+      </div>
+
+      {/* Rotation + serving */}
+      <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
+        <div>
+          Rotation: <span style={pill}>{s.rotation}</span>
         </div>
-        <div className="card" style={{ padding: 16, border: '1px solid #eee', borderRadius: 12 }}>
-          <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>If we win next point</div>
-          <div style={{ fontSize: 28, fontWeight: 800 }}>{(pIfWin * 100).toFixed(1)}%</div>
-          <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>
-            Δ {( (pIfWin - pNow) * 100 ).toFixed(1)} pts
-          </div>
+        <div>
+          Serving: <span style={pill}>{s.serving}</span>
         </div>
-        <div className="card" style={{ padding: 16, border: '1px solid #eee', borderRadius: 12 }}>
-          <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>If we lose next point</div>
-          <div style={{ fontSize: 28, fontWeight: 800 }}>{(pIfLose * 100).toFixed(1)}%</div>
-          <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>
-            Δ {( (pIfLose - pNow) * 100 ).toFixed(1)} pts
-          </div>
+        <div>
+          Laps/Extras: <span style={pill}>{laps}/{extras}</span>
         </div>
       </div>
 
-      {/* Last rally summary if your store exposes it */}
-      {Array.isArray(s?.rallies) && s.rallies.length > 0 && (
-        <div style={{ marginTop: 24, opacity: 0.8 }}>
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>Last Rally</div>
-          <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, background: '#fafafa', padding: 12, borderRadius: 8, border: '1px solid #eee' }}>
-            {JSON.stringify(s.rallies[s.rallies.length - 1], null, 2)}
-          </pre>
+      {/* Chance to win widget */}
+      <div className="card" style={{ padding: 12, marginBottom: 16, borderRadius: 12, border: '1px solid #eee' }}>
+        <div style={{ fontWeight: 700, marginBottom: 6 }}>Win Probability (50/50 rallies)</div>
+        <div>Now: <b>{(chance.now * 100).toFixed(1)}%</b></div>
+        <div style={{ fontSize: 12, opacity: 0.8 }}>
+          If we win next point: <b>{(chance.deltaWin * 100).toFixed(1)}%</b> change · If we lose: <b>{(chance.deltaLose * 100).toFixed(1)}%</b> change
         </div>
-      )}
+      </div>
+
+      {/* Table per-rotation */}
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr>
+            <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Zone (Z)</th>
+            <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Serves</th>
+            <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>RealPts</th>
+            <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>PS%</th>
+            <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Receives</th>
+            <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Sideouts</th>
+            <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>SO%</th>
+            <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>PS%+SO%</th>
+            <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Winning?</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.rot}>
+              <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{labelRot(r.rot)}</td>
+              <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{r.serves}</td>
+              <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{r.realPts}</td>
+              <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{r.psPct.toFixed(3)}</td>
+              <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{r.receives}</td>
+              <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{r.sideouts}</td>
+              <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{r.soPct.toFixed(3)}</td>
+              <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{r.sumPct.toFixed(3)}</td>
+              <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{r.winning ? 'Winning' : 'Losing'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
