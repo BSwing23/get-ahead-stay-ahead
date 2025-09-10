@@ -17,13 +17,12 @@ const pill: React.CSSProperties = {
 
 function labelRot(r: Rot) { return `Z${r}`; }
 
-/** 50/50 rallies, win-by-2, target points. Memoized & terminating. */
+/** Win probability (50/50 rallies, win-by-2). */
 function winProb(a: number, b: number, target: number, memo: Map<string, number>): number {
   if (a >= target && a - b >= 2) return 1;
   if (b >= target && b - a >= 2) return 0;
   const key = `${a},${b},${target}`;
-  const hit = memo.get(key);
-  if (hit !== undefined) return hit;
+  if (memo.has(key)) return memo.get(key)!;
   const p =
     0.5 * winProb(a + 1, b, target, memo) +
     0.5 * winProb(a, b + 1, target, memo);
@@ -34,12 +33,21 @@ function winProb(a: number, b: number, target: number, memo: Map<string, number>
 export default function LivePage() {
   const s = useMatchStore();
 
-  // Derive target without fighting TS types:
-  // try state fields if they exist, else 15 for set 5, else 25.
+  // Derive target: fall back to 15 for set 5, else 25.
   const target =
     (s as any).target ??
     (s as any).rules?.target ??
     (s.currentSet === 5 ? 15 : 25);
+
+  // Derive actual points from rally history
+  const { realMy, realOpp } = useMemo(() => {
+    let my = 0, opp = 0;
+    for (const r of s.rallies) {
+      if (r.winner === 'my') my++;
+      else if (r.winner === 'opp') opp++;
+    }
+    return { realMy: my, realOpp: opp };
+  }, [s.rallies]);
 
   const { byRot, laps, extras } = useMemo(() => computeStats(s.rallies), [s.rallies]);
 
@@ -62,11 +70,11 @@ export default function LivePage() {
 
   const chance = useMemo(() => {
     const memo = new Map<string, number>();
-    const pNow = winProb(s.realMy, s.realOpp, target, memo);
-    const pIfWin = winProb(s.realMy + 1, s.realOpp, target, memo);
-    const pIfLose = winProb(s.realMy, s.realOpp + 1, target, memo);
+    const pNow = winProb(realMy, realOpp, target, memo);
+    const pIfWin = winProb(realMy + 1, realOpp, target, memo);
+    const pIfLose = winProb(realMy, realOpp + 1, target, memo);
     return { now: pNow, deltaWin: pIfWin - pNow, deltaLose: pIfLose - pNow };
-  }, [s.realMy, s.realOpp, target]);
+  }, [realMy, realOpp, target]);
 
   const addMy = () => s.commitRally({ winner: 'my' });
   const addOpp = () => s.commitRally({ winner: 'opp' });
@@ -126,29 +134,23 @@ export default function LivePage() {
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr>
-            <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Zone (Z)</th>
-            <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Serves</th>
-            <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>RealPts</th>
-            <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>PS%</th>
-            <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Receives</th>
-            <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Sideouts</th>
-            <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>SO%</th>
-            <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>PS%+SO%</th>
-            <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Winning?</th>
+            <th>Zone</th><th>Serves</th><th>RealPts</th><th>PS%</th>
+            <th>Receives</th><th>Sideouts</th><th>SO%</th>
+            <th>PS%+SO%</th><th>Winning?</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => (
             <tr key={r.rot}>
-              <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{labelRot(r.rot)}</td>
-              <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{r.serves}</td>
-              <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{r.realPts}</td>
-              <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{r.psPct.toFixed(3)}</td>
-              <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{r.receives}</td>
-              <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{r.sideouts}</td>
-              <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{r.soPct.toFixed(3)}</td>
-              <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{r.sumPct.toFixed(3)}</td>
-              <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{r.winning ? 'Winning' : 'Losing'}</td>
+              <td>{labelRot(r.rot)}</td>
+              <td>{r.serves}</td>
+              <td>{r.realPts}</td>
+              <td>{r.psPct.toFixed(3)}</td>
+              <td>{r.receives}</td>
+              <td>{r.sideouts}</td>
+              <td>{r.soPct.toFixed(3)}</td>
+              <td>{r.sumPct.toFixed(3)}</td>
+              <td>{r.winning ? 'Winning' : 'Losing'}</td>
             </tr>
           ))}
         </tbody>
