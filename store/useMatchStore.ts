@@ -1,253 +1,155 @@
-// store/useMatchStore.ts
-import { create } from "zustand";
+'use client';
+import { create } from 'zustand';
 
-/** ===== Types ===== */
-export type Rot = 1 | 2 | 3 | 4 | 5 | 6;
-export type Team = "my" | "opp";
-export type StartIn = "serve" | "receive";
-export type Side = "left" | "right";
-export type Convention = "usa" | "fivb";
-export type LangCode = "en" | "es" | "fr" | "de" | "it" | "pt";
+export type Rot = 1|2|3|4|5|6;
+export type Team = 'my'|'opp';
 
-export interface Rally {
-  /** who won the rally */
+export type Rally = {
   winner: Team;
-  /** rotation numbers on that rally (for PS/SO attribution) */
-  rotMy: Rot;
+  rotMy: Rot;   // rotation number when rally started
   rotOpp: Rot;
-  /** which team was serving for that rally */
-  server: Team;
-}
+  serveBy: Team; // who served that rally
+};
 
-export interface MatchState {
-  // Setup / prefs
-  myName: string;
-  oppName: string;
-  lang: LangCode;
-  convention: Convention;
-  side: Side; // which scoreboard side "My" is on
-  startIn: StartIn;
-  startRotationMy: Rot;
+export type ByRot = {
+  serves: number;
+  receives: number;
+  ps: number;       // points scored on serve
+  so: number;       // sideouts won on receive
+};
 
-  // Live state
-  currentSet: number;
+export type Stats = {
+  byRot: Record<Rot, ByRot>;
+  laps: number;
+  extras: number;
+};
+
+export type MatchState = {
+  // scoreboard
   scoreMy: number;
   scoreOpp: number;
-  serving: Team; // current server
+  // “real points” (serve points only)
+  realMy: number;
+  realOpp: number;
+  // target (25 or 15)
+  target: number;
+  setTarget: (n:number)=>void;
+
+  // rotation tracking (we keep it simple: rotMy advances after we win on receive or lose on serve)
   rotMy: Rot;
   rotOpp: Rot;
+
+  // rallies history
   rallies: Rally[];
+  commitRally: (winner: Team)=>void;
+  resetSet: ()=>void;
 
-  // Actions
-  setMyName: (v: string) => void;
-  setOppName: (v: string) => void;
-  setLang: (v: LangCode) => void;
-  setConvention: (v: Convention) => void;
-  setSide: (v: Side) => void;
-  setStartIn: (v: StartIn) => void;
-  setStartRotation: (v: Rot) => void;
+  // helpers
+  computeStats: (rallies?: Rally[])=>Stats;
+};
 
-  /** record a rally result and advance rotations/scores */
-  commitRally: (winner: Team) => void;
-
-  /** zero just the current set’s live state (not names/prefs) */
-  resetSet: () => void;
-
-  /** increment set number and reset live scores/rotations */
-  endSet: () => void;
+function nextRot(r: Rot): Rot {
+  return (r % 6 + 1) as Rot;
 }
 
-/** ===== Helpers ===== */
-const nextRot = (r: Rot): Rot => ((r % 6) + 1) as Rot;
-
-/**
- * Given the live rallies, compute rotation-level stats and laps/extras.
- * PS = Points scored while serving (per rotation)
- * SO = Sideouts won while receiving (per rotation)
- */
-export function computeStats(rallies: Rally[]): {
-  byRot: Record<
-    Rot,
-    {
-      serves: number;
-      receives: number;
-      ps: number; // points while serving
-      so: number; // sideouts won while receiving
-    }
-  >;
-  laps: number; // full 6-rotation cycles the serving team completed
-  extras: number; // extra rotations beyond whole laps
-} {
-  const init = { serves: 0, receives: 0, ps: 0, so: 0 };
-  const byRot: Record<Rot, typeof init> = {
-    1: { ...init },
-    2: { ...init },
-    3: { ...init },
-    4: { ...init },
-    5: { ...init },
-    6: { ...init },
+function emptyByRot(): Record<Rot, ByRot> {
+  return {
+    1:{serves:0,receives:0,ps:0,so:0},
+    2:{serves:0,receives:0,ps:0,so:0},
+    3:{serves:0,receives:0,ps:0,so:0},
+    4:{serves:0,receives:0,ps:0,so:0},
+    5:{serves:0,receives:0,ps:0,so:0},
+    6:{serves:0,receives:0,ps:0,so:0},
   };
-
-  // Track how many distinct serves by "my" team to estimate laps/extras
-  let myServeRotVisits: Rot[] = [];
-
-  rallies.forEach((r) => {
-    if (r.server === "my") {
-      // a serve happened from my rotation r.rotMy
-      byRot[r.rotMy].serves += 1;
-      if (!myServeRotVisits.length || myServeRotVisits[myServeRotVisits.length - 1] !== r.rotMy) {
-        myServeRotVisits.push(r.rotMy);
-      }
-      if (r.winner === "my") {
-        byRot[r.rotMy].ps += 1;
-      } else {
-        // opp won, that is a sideout for opp (not counted in my SO)
-      }
-    } else {
-      // opp served; my team received at my rotation r.rotMy
-      byRot[r.rotMy].receives += 1;
-      if (r.winner === "my") {
-        // my sideout (won point when receiving)
-        byRot[r.rotMy].so += 1;
-      }
-    }
-  });
-
-  // Compute laps/extras from distinct serving rotations visited
-  // A "lap" is every 6 distinct my serving rotations we pass through.
-  // Extras are the remainder.
-  // This is an approximation that aligns with how we snapshot during a set.
-  const distinctMyServeRots = new Set(myServeRotVisits);
-  // If we served at least once from any rotation, count how far we cycled
-  // Better: approximate count by how many times we returned to start rot.
-  let laps = 0;
-  let extras = 0;
-  if (myServeRotVisits.length > 0) {
-    // Partition the sequence by occurrences of the first rotation
-    const first = myServeRotVisits[0];
-    let returnsToFirst = myServeRotVisits.filter((r) => r === first).length - 1; // number of times we came back to start
-    if (returnsToFirst < 0) returnsToFirst = 0;
-    laps = returnsToFirst;
-    // Extras: rotations past the last full lap, counting unique rotations after final return
-    if (returnsToFirst === 0) {
-      // still in first lap
-      extras = distinctMyServeRots.size - 1 >= 0 ? distinctMyServeRots.size - 1 : 0;
-    } else {
-      // crude but consistent: extras are how many steps into the next cycle since last full return
-      // find last index of `first`, count unique rots after that
-      const lastFirstIdx = myServeRotVisits.lastIndexOf(first);
-      const tail = new Set(myServeRotVisits.slice(lastFirstIdx + 1));
-      extras = tail.size;
-    }
-  }
-
-  return { byRot, laps, extras };
 }
 
-/** ===== Store ===== */
-export const useMatchStore = create<MatchState>((set, get) => ({
-  // Defaults
-  myName: "My",
-  oppName: "Opp",
-  lang: "en",
-  convention: "usa",
-  side: "left",
-  startIn: "receive",
-  startRotationMy: 1,
-
-  currentSet: 1,
+export const useMatchStore = create<MatchState>((set,get)=>({
   scoreMy: 0,
   scoreOpp: 0,
-  serving: "opp", // since startIn default is 'receive'
+  realMy: 0,
+  realOpp: 0,
+  target: 25,
+  setTarget: (n:number)=>set({target: n===15?15:25}),
+
   rotMy: 1,
   rotOpp: 1,
+
   rallies: [],
 
-  // Setters
-  setMyName: (v) => set({ myName: v }),
-  setOppName: (v) => set({ oppName: v }),
-  setLang: (v) => set({ lang: v }),
-  setConvention: (v) => set({ convention: v }),
-  setSide: (v) => set({ side: v }),
-  setStartIn: (v) =>
-    set((s) => ({
-      startIn: v,
-      serving: v === "serve" ? "my" : "opp",
-      // keep rotations; only impacts who serves first
-    })),
-  setStartRotation: (v) =>
-    set((s) => ({
-      startRotationMy: v,
-      rotMy: v,
-      // Opp rotation is opposite. If you want to mirror, shift by 3:
-      rotOpp: (((v + 2) % 6) + 1) as Rot, // 3 ahead modulo 6
-    })),
-
-  commitRally: (winner) => {
+  commitRally: (winner: Team) => {
     const s = get();
-    const server = s.serving;
+    // who served this rally? (if teams have equal rotations, assume 'my' started receiving -> opp served first)
+    // We track server by parity of last rally: simplest is "whoever didn't just sideout keeps serving".
+    // To keep deterministic, infer from score changes: if my score increased and we were serving, it's PS; if my score increased and we were receiving, it's SO.
+    // Implement with a simple rule: we store serveBy on each rally using last rally, else assume 'my' serves to start.
+    const last = s.rallies[s.rallies.length-1];
+    const serveBy: Team = last ? (last.winner === last.serveBy ? last.serveBy : (last.serveBy==='my'?'opp':'my')) : 'my';
 
-    // Current rotations (before rally)
+    // compute rotations attached to this rally
     const rotMy = s.rotMy;
     const rotOpp = s.rotOpp;
 
-    // Update score
-    const scoreMy = s.scoreMy + (winner === "my" ? 1 : 0);
-    const scoreOpp = s.scoreOpp + (winner === "opp" ? 1 : 0);
+    // scoring
+    let scoreMy = s.scoreMy;
+    let scoreOpp = s.scoreOpp;
+    let realMy = s.realMy;
+    let realOpp = s.realOpp;
 
-    // Determine who serves next & how rotations shift
-    let nextServing: Team = server;
-    let nextRotMy: Rot = rotMy;
-    let nextRotOpp: Rot = rotOpp;
-
-    if (winner === server) {
-      // point on serve; same server continues, no rotation change
-      nextServing = server;
+    if (winner==='my') {
+      scoreMy += 1;
+      if (serveBy==='my') realMy += 1; // point on serve
     } else {
-      // sideout: serve flips, receiving team rotates
-      nextServing = server === "my" ? "opp" : "my";
-      if (nextServing === "my") {
-        // my team will now serve -> my team rotates
-        nextRotMy = nextRot(s.rotMy);
-      } else {
-        // opp will now serve -> opp rotates
-        nextRotOpp = nextRot(s.rotOpp);
-      }
+      scoreOpp += 1;
+      if (serveBy==='opp') realOpp += 1;
     }
 
-    const rally: Rally = { winner, rotMy, rotOpp, server };
+    // rotation changes: winner keeps serve; loser rotates
+    let nextMy = s.rotMy;
+    let nextOpp = s.rotOpp;
+    if (winner==='my') {
+      // opp lost -> they rotate
+      nextOpp = nextRot(s.rotOpp);
+    } else {
+      // we lost -> we rotate
+      nextMy = nextRot(s.rotMy);
+    }
+
+    const rally: Rally = { winner, rotMy, rotOpp, serveBy };
 
     set({
-      scoreMy,
-      scoreOpp,
-      serving: nextServing,
-      rotMy: nextRotMy,
-      rotOpp: nextRotOpp,
       rallies: [...s.rallies, rally],
+      scoreMy, scoreOpp, realMy, realOpp,
+      rotMy: nextMy, rotOpp: nextOpp,
     });
   },
 
-  resetSet: () =>
-    set((s) => ({
-      scoreMy: 0,
-      scoreOpp: 0,
-      serving: s.startIn === "serve" ? "my" : "opp",
-      rotMy: s.startRotationMy,
-      rotOpp: (((s.startRotationMy + 2) % 6) + 1) as Rot,
-      rallies: [],
-    })),
+  resetSet: ()=> set({
+    scoreMy:0, scoreOpp:0, realMy:0, realOpp:0,
+    rotMy:1, rotOpp:1, rallies:[],
+  }),
 
-  endSet: () =>
-    set((s) => ({
-      currentSet: s.currentSet + 1,
-      scoreMy: 0,
-      scoreOpp: 0,
-      serving: s.startIn === "serve" ? "my" : "opp",
-      rotMy: s.startRotationMy,
-      rotOpp: (((s.startRotationMy + 2) % 6) + 1) as Rot,
-      rallies: [],
-    })),
+  computeStats: (r?: Rally[])=>{
+    const rallies = r ?? get().rallies;
+    const byRot = emptyByRot();
+
+    // Tally PS/SO per rotation *for my team*
+    rallies.forEach((ra)=>{
+      const mine = ra.serveBy==='my';
+      if (mine) {
+        byRot[ra.rotMy].serves += 1;
+        if (ra.winner==='my') byRot[ra.rotMy].ps += 1;
+      } else {
+        byRot[ra.rotMy].receives += 1;
+        if (ra.winner==='my') byRot[ra.rotMy].so += 1;
+      }
+    });
+
+    // laps/extras (rough): count maximum rotation count seen then minus laps
+    const servesPerRot = Object.values(byRot).map(b=>b.serves);
+    const maxServes = Math.max(0,...servesPerRot);
+    const laps = Math.floor(maxServes/6);
+    const extras = Math.max(0, maxServes - laps*6);
+
+    return { byRot, laps, extras };
+  },
 }));
-
-// Provide a default export for places that import default.
-export default useMatchStore;
