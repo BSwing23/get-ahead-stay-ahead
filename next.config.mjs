@@ -1,8 +1,13 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  // IMPORTANT: do NOT use `output: 'export'` — we need dynamic /live
-  // output: 'standalone' is fine on Vercel (or just omit `output`)
+  experimental: {
+    optimizeCss: true,
+  },
+  // disable prerender for Live to avoid infinite loop
+  async redirects() {
+    return [];
+  },
 };
 
-module.exports = nextConfig;
+export default nextConfig;
