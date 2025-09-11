@@ -1,13 +1,9 @@
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  experimental: {
-    optimizeCss: true,
-  },
-  // disable prerender for Live to avoid infinite loop
-  async redirects() {
-    return [];
-  },
+  // remove optimizeCss to avoid requiring 'critters'
+  experimental: {},
 };
 
 export default nextConfig;
