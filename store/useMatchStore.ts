@@ -2,22 +2,22 @@
 
 import { create } from 'zustand';
 
-/** ----- Types ----- */
+// ===== Types =====
 export type Rot = 1 | 2 | 3 | 4 | 5 | 6;
 export type Team = 'my' | 'opp';
 
 export type Rally = {
-  winner: Team;
-  rotMy: Rot;      // my rotation at rally start
-  rotOpp: Rot;     // opp rotation at rally start
-  serveBy: Team;   // who served this rally
+  winner: Team;     // who won the rally
+  rotMy: Rot;       // my rotation when the rally started
+  rotOpp: Rot;      // opponent rotation when the rally started
+  serveBy: Team;    // who served the rally
 };
 
 export type ByRot = {
-  serves: number;     // total rallies started while we were serving in this rot
-  receives: number;   // total rallies started while we were receiving in this rot
-  ps: number;         // points scored on serve (my team)
-  so: number;         // sideouts won on receive (my team)
+  serves: number;   // number of times *my team* served in this rotation
+  receives: number; // number of times *my team* received in this rotation
+  ps: number;       // points scored on serve (my team)
+  so: number;       // sideouts won on receive (my team)
 };
 
 export type Stats = {
@@ -39,20 +39,20 @@ export type MatchState = {
   target: number;
   setTarget: (n: number) => void;
 
-  // rotations (advance loser)
+  // rotations
   rotMy: Rot;
   rotOpp: Rot;
 
-  // history
+  // rally history
   rallies: Rally[];
   commitRally: (winner: Team) => void;
   resetSet: () => void;
 
-  // helpers
+  // derived stats
   computeStats: (rallies?: Rally[]) => Stats;
 };
 
-/** ----- Helpers ----- */
+// ===== Helpers =====
 function nextRot(r: Rot): Rot {
   return ((r % 6) + 1) as Rot;
 }
@@ -68,10 +68,11 @@ function emptyByRot(): Record<Rot, ByRot> {
   };
 }
 
-/** ----- Store ----- */
+// ===== Store =====
 export const useMatchStore = create<MatchState>((set, get) => ({
   scoreMy: 0,
   scoreOpp: 0,
+
   realMy: 0,
   realOpp: 0,
 
@@ -86,7 +87,8 @@ export const useMatchStore = create<MatchState>((set, get) => ({
   commitRally: (winner: Team) => {
     const s = get();
 
-    // Infer server: if last rally winner kept serve; otherwise it flipped.
+    // Infer server: if last rally winner === last server, same server continues;
+    // else serve flips. If no rallies yet, start with 'my' serving.
     const last = s.rallies[s.rallies.length - 1];
     const serveBy: Team = last
       ? last.winner === last.serveBy
@@ -96,10 +98,11 @@ export const useMatchStore = create<MatchState>((set, get) => ({
         : 'my'
       : 'my';
 
+    // attach current rotations to this rally
     const rotMy = s.rotMy;
     const rotOpp = s.rotOpp;
 
-    // Update scores & real points
+    // scoring
     let scoreMy = s.scoreMy;
     let scoreOpp = s.scoreOpp;
     let realMy = s.realMy;
@@ -107,17 +110,20 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 
     if (winner === 'my') {
       scoreMy += 1;
-      if (serveBy === 'my') realMy += 1;
+      if (serveBy === 'my') realMy += 1; // point on my serve
     } else {
       scoreOpp += 1;
-      if (serveBy === 'opp') realOpp += 1;
+      if (serveBy === 'opp') realOpp += 1; // point on opp serve
     }
 
-    // Loser rotates
+    // rotation changes: loser rotates
     let nextMy = s.rotMy;
     let nextOpp = s.rotOpp;
-    if (winner === 'my') nextOpp = nextRot(s.rotOpp);
-    else nextMy = nextRot(s.rotMy);
+    if (winner === 'my') {
+      nextOpp = nextRot(s.rotOpp);
+    } else {
+      nextMy = nextRot(s.rotMy);
+    }
 
     const rally: Rally = { winner, rotMy, rotOpp, serveBy };
 
@@ -143,25 +149,24 @@ export const useMatchStore = create<MatchState>((set, get) => ({
       rallies: [],
     }),
 
-  computeStats: (r?: Rally[]) => {
-    const rallies = r ?? get().rallies;
+  computeStats: (input?: Rally[]) => {
+    const rallies = input ?? get().rallies;
     const byRot = emptyByRot();
 
+    // Tally PS/SO by my rotation
     rallies.forEach((ra) => {
       const mineServing = ra.serveBy === 'my';
-      const rot = ra.rotMy; // we always bucket by my rotation at start
-
       if (mineServing) {
-        byRot[rot].serves += 1;
-        if (ra.winner === 'my') byRot[rot].ps += 1;
+        byRot[ra.rotMy].serves += 1;
+        if (ra.winner === 'my') byRot[ra.rotMy].ps += 1;
       } else {
-        byRot[rot].receives += 1;
-        if (ra.winner === 'my') byRot[rot].so += 1;
+        byRot[ra.rotMy].receives += 1;
+        if (ra.winner === 'my') byRot[ra.rotMy].so += 1;
       }
     });
 
-    const servesPerRot = Object.values(byRot).map((b) => b.serves);
-    const maxServes = Math.max(0, ...servesPerRot);
+    // Simple laps/extras approximation from serves (my team)
+    const maxServes = Math.max(0, ...Object.values(byRot).map((b) => b.serves));
     const laps = Math.floor(maxServes / 6);
     const extras = Math.max(0, maxServes - laps * 6);
 
