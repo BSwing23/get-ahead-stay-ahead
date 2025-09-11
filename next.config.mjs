@@ -1,8 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  typescript: { ignoreBuildErrors: true },
-  eslint: { ignoreDuringBuilds: true },
-  experimental: { typedRoutes: false },
+  // IMPORTANT: do NOT use `output: 'export'` — we need dynamic /live
+  // output: 'standalone' is fine on Vercel (or just omit `output`)
 };
-export default nextConfig;
+
+module.exports = nextConfig;

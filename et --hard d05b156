@@ -1,0 +1,20 @@
+* [33m3ac4f81[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m Refactor MatchStore: add currentSet, export types, computeStats
+* [33m8159347[m Export computeStats so it can be used in summary/setup
+* [33md64aa65[m Fix: use setStartRotation() in Setup page
+* [33mb78e271[m Setup: fix Convention cast + tidy UI
+* [33m56dac4a[m Fix useMatchStore with proper StartIn typing
+* [33ma4ec905[m fix(setup): remove type imports; clean UI; no StartIn/Side imports
+* [33md640bf3[m fix: remove Side import
+* [33m6fbc28d[m fix: remove Convention import
+* [33meafc57e[m Fix MatchState to include stats and lang
+* [33me5c5a51[m Fix MatchState to include stats and lang
+* [33mf590cb8[m Fix summary page to use computeStats instead of s.stats()
+* [33md05b156[m Add multi-language + setup prefs to store; hook Setup page
+* [33me9318c5[m Wire End Set -> Season; compute laps/extras & PS/SO; navigate to /season
+* [33m4babc16[m Refactor season page to use rotations constant
+* [33mbb7f2b0[m redeploy
+* [33m11e3dec[m redeploy
+* [33ma2c9641[m redeploy
+* [33mf3aa2b8[m Global nav; Season page; End Set navigates to Summary
+* [33me8db484[m Home: add Season link + tidy nav
+* [33m21fddfb[m Add Real Points and wire buttons to commitRally
