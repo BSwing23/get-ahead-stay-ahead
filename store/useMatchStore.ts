@@ -35,7 +35,7 @@ export type MatchState = {
   target: number;
   setTarget: (n:number)=>void;
 
-  // rotation tracking (we keep it simple: rotMy advances after we win on receive or lose on serve)
+  // rotation tracking
   rotMy: Rot;
   rotOpp: Rot;
 
@@ -43,6 +43,10 @@ export type MatchState = {
   rallies: Rally[];
   commitRally: (winner: Team)=>void;
   resetSet: ()=>void;
+
+  // quick debug bumpers (to prove UI/store wiring)
+  bumpMy: ()=>void;
+  bumpOpp: ()=>void;
 
   // helpers
   computeStats: (rallies?: Rally[])=>Stats;
@@ -78,21 +82,19 @@ export const useMatchStore = create<MatchState>((set,get)=>({
 
   commitRally: (winner: Team) => {
     const s = get();
-    // who served this rally? (if teams have equal rotations, assume 'my' started receiving -> opp served first)
-    // We track server by parity of last rally: simplest is "whoever didn't just sideout keeps serving".
-    // To keep deterministic, infer from score changes: if my score increased and we were serving, it's PS; if my score increased and we were receiving, it's SO.
-    // Implement with a simple rule: we store serveBy on each rally using last rally, else assume 'my' serves to start.
+
+    // infer server from last rally (winner keeps serve; sideout flips)
     const last = s.rallies[s.rallies.length-1];
     const serveBy: Team = last ? (last.winner === last.serveBy ? last.serveBy : (last.serveBy==='my'?'opp':'my')) : 'my';
 
-    // compute rotations attached to this rally
+    // attach current rotations to this rally
     const rotMy = s.rotMy;
     const rotOpp = s.rotOpp;
 
     // scoring
     let scoreMy = s.scoreMy;
     let scoreOpp = s.scoreOpp;
-    let realMy = s.realMy;
+    let realMy  = s.realMy;
     let realOpp = s.realOpp;
 
     if (winner==='my') {
@@ -103,14 +105,12 @@ export const useMatchStore = create<MatchState>((set,get)=>({
       if (serveBy==='opp') realOpp += 1;
     }
 
-    // rotation changes: winner keeps serve; loser rotates
+    // rotation changes: loser rotates
     let nextMy = s.rotMy;
     let nextOpp = s.rotOpp;
     if (winner==='my') {
-      // opp lost -> they rotate
       nextOpp = nextRot(s.rotOpp);
     } else {
-      // we lost -> we rotate
       nextMy = nextRot(s.rotMy);
     }
 
@@ -128,11 +128,14 @@ export const useMatchStore = create<MatchState>((set,get)=>({
     rotMy:1, rotOpp:1, rallies:[],
   }),
 
+  // debug bumpers
+  bumpMy: ()=> set((st)=>({ scoreMy: st.scoreMy+1, realMy: st.realMy+1 })),
+  bumpOpp: ()=> set((st)=>({ scoreOpp: st.scoreOpp+1, realOpp: st.realOpp+1 })),
+
   computeStats: (r?: Rally[])=>{
     const rallies = r ?? get().rallies;
     const byRot = emptyByRot();
 
-    // Tally PS/SO per rotation *for my team*
     rallies.forEach((ra)=>{
       const mine = ra.serveBy==='my';
       if (mine) {
@@ -144,7 +147,6 @@ export const useMatchStore = create<MatchState>((set,get)=>({
       }
     });
 
-    // laps/extras (rough): count maximum rotation count seen then minus laps
     const servesPerRot = Object.values(byRot).map(b=>b.serves);
     const maxServes = Math.max(0,...servesPerRot);
     const laps = Math.floor(maxServes/6);
@@ -153,3 +155,6 @@ export const useMatchStore = create<MatchState>((set,get)=>({
     return { byRot, laps, extras };
   },
 }));
+
+// 🔒 Export both named and default to avoid import mismatches
+export default useMatchStore;
