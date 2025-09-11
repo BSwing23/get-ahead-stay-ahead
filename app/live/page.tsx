@@ -4,62 +4,94 @@ import React, { useMemo } from 'react';
 import Link from 'next/link';
 import { useMatchStore } from '@/store/useMatchStore';
 
-/**
- * Safe, memoized win probability for 50/50 rallies, win-by-2.
- * Guards:
- * - invalid/zero target → 50%
- * - terminal states handled
- * - hard cap when either side goes beyond target+2 (prevents runaway)
- * - memoization to avoid explosion
- */
+/** Memoized 50/50 rally win probability to target, win-by-2 (guarded). */
 function winProb(a: number, b: number, target: number, memo: Map<string, number>): number {
   if (!target || target < 1 || target > 200) return 0.5;
 
   const key = `${a},${b},${target}`;
-  const cached = memo.get(key);
-  if (cached !== undefined) return cached;
+  const hit = memo.get(key);
+  if (hit !== undefined) return hit;
 
-  // Terminal conditions
   if (a >= target && a - b >= 2) return 1;
   if (b >= target && b - a >= 2) return 0;
 
-  // Safety cap to stop unbounded recursion in pathological states
+  // safety cap prevents runaway recursion in pathological states
   if (a > target + 2 || b > target + 2) {
     const res = a > b ? 1 : 0;
     memo.set(key, res);
     return res;
   }
 
-  const next =
-    0.5 * (winProb(a + 1, b, target, memo) + winProb(a, b + 1, target, memo));
+  const res = 0.5 * (winProb(a + 1, b, target, memo) + winProb(a, b + 1, target, memo));
+  memo.set(key, res);
+  return res;
+}
 
-  memo.set(key, next);
-  return next;
+/** Call the store in a defensive way so buttons always work. */
+function fireRally(s: any, who: 'my' | 'opp') {
+  if (!s) return;
+
+  // 1) commitRally('my'|'opp')
+  try {
+    if (typeof s.commitRally === 'function' && s.commitRally.length >= 1) {
+      s.commitRally(who);
+      console.log('[Live] commitRally(who) fired:', who);
+      return;
+    }
+  } catch (e) {
+    console.warn('[Live] commitRally(who) failed, trying object form…', e);
+  }
+
+  // 2) commitRally({ winner: 'my'|'opp' })
+  try {
+    if (typeof s.commitRally === 'function') {
+      s.commitRally({ winner: who });
+      console.log('[Live] commitRally({winner}) fired:', who);
+      return;
+    }
+  } catch (e) {
+    console.warn('[Live] commitRally({winner}) failed, trying addRally…', e);
+  }
+
+  // 3) addRally fallback (some stores use a different name)
+  try {
+    if (typeof s.addRally === 'function') {
+      // Support both signatures here too
+      if (s.addRally.length >= 1) {
+        s.addRally(who);
+      } else {
+        s.addRally({ winner: who });
+      }
+      console.log('[Live] addRally fired:', who);
+      return;
+    }
+  } catch (e) {
+    console.error('[Live] addRally failed:', e);
+  }
+
+  console.error('[Live] No rally method matched. Please expose commitRally or addRally in the store.');
 }
 
 export default function LivePage() {
-  // Named import only (no default import)
   const s = useMatchStore() as any;
 
-  // Be tolerant of varying store shapes while we stabilize:
+  // read scores defensively (names varied across builds)
   const my = s?.realMy ?? s?.scoreMy ?? 0;
   const opp = s?.realOpp ?? s?.scoreOpp ?? 0;
 
-  // Use provided target if present; otherwise default to 25
+  // default to 25 if store doesn’t provide
   const target: number = s?.target ?? 25;
 
   const chance = useMemo(() => {
     const memo = new Map<string, number>();
-    return {
-      now: winProb(my, opp, target, memo),
-      pIfWin: winProb(my + 1, opp, target, memo),
-      pIfLose: winProb(my, opp + 1, target, memo),
-    };
+    const now = winProb(my, opp, target, memo);
+    const pIfWin = winProb(my + 1, opp, target, memo);
+    const pIfLose = winProb(my, opp + 1, target, memo);
+    return { now, pIfWin, pIfLose };
   }, [my, opp, target]);
 
-  const commitRally = s?.commitRally ?? (() => {});
-  const addMy = () => commitRally({ winner: 'my' });
-  const addOpp = () => commitRally({ winner: 'opp' });
+  const addMy = () => fireRally(s, 'my');
+  const addOpp = () => fireRally(s, 'opp');
 
   return (
     <div style={{ padding: 16, maxWidth: 960, margin: '0 auto' }}>
@@ -71,7 +103,9 @@ export default function LivePage() {
 
       <h1>Live</h1>
 
-      <div style={{ marginBottom: 12 }}>Score: <b>{my}</b> — <b>{opp}</b> (to {target}, win by 2)</div>
+      <div style={{ marginBottom: 12 }}>
+        Score: <b>{my}</b> — <b>{opp}</b> (to {target}, win by 2)
+      </div>
 
       <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
         <button onClick={addMy} style={{ padding: '8px 12px' }}>+1 Us</button>
