@@ -1,76 +1,58 @@
 'use client';
+
+export const dynamic = "force-dynamic"; // <-- disables prerendering
+
 import React, { useMemo } from 'react';
 import Link from 'next/link';
-import { useMatchStore } from '@/store/useMatchStore';
+import { useMatchStore, type Team } from '@/store/useMatchStore';
+
+// ---- Win probability ----
+function winProb(a: number, b: number, target: number, memo: Map<string, number>): number {
+  const key = `${a},${b}`;
+  if (memo.has(key)) return memo.get(key)!;
+
+  if (a >= target && a - b >= 2) return 1;
+  if (b >= target && b - a >= 2) return 0;
+
+  // stop runaway recursion (cap at 200 rallies)
+  if (a + b > 200) return 0.5;
+
+  const p = 0.5 * winProb(a + 1, b, target, memo) + 0.5 * winProb(a, b + 1, target, memo);
+  memo.set(key, p);
+  return p;
+}
 
 export default function LivePage() {
   const s = useMatchStore();
 
-  // ---- Compute win probability ----
   const chance = useMemo(() => {
-    if (!s) return { now: 0, pIfWin: 0, pIfLose: 0 };
-
-    const target = s.target;
     const memo = new Map<string, number>();
-
-    function winProb(my: number, opp: number): number {
-      if (my >= target && my - opp >= 2) return 1; // I win
-      if (opp >= target && opp - my >= 2) return 0; // Opp wins
-      const key = `${my},${opp}`;
-      if (memo.has(key)) return memo.get(key)!;
-      const res = 0.5 * winProb(my + 1, opp) + 0.5 * winProb(my, opp + 1);
-      memo.set(key, res);
-      return res;
-    }
-
-    const now = winProb(s.scoreMy, s.scoreOpp);
-    const pIfWin = winProb(s.scoreMy + 1, s.scoreOpp);
-    const pIfLose = winProb(s.scoreMy, s.scoreOpp + 1);
-
-    return { now, pIfWin, pIfLose };
+    const target = s.target ?? 25;
+    const pNow = winProb(s.scoreMy, s.scoreOpp, target, memo);
+    const pIfWin = winProb(s.scoreMy + 1, s.scoreOpp, target, memo);
+    const pIfLose = winProb(s.scoreMy, s.scoreOpp + 1, target, memo);
+    return { now: pNow, deltaWin: pIfWin - pNow, deltaLose: pIfLose - pNow };
   }, [s.scoreMy, s.scoreOpp, s.target]);
 
-  // ---- Button handlers ----
-  const addMy = () => s.commitRally('my');
-  const addOpp = () => s.commitRally('opp');
-  const reset = () => s.resetSet();
+  const addMy = () => s.commitRally('my' as Team);
+  const addOpp = () => s.commitRally('opp' as Team);
 
   return (
-    <div style={{ padding: 20 }}>
-      <h1>Live Scoring</h1>
-
-      <div style={{ marginBottom: 12 }}>
-        <strong>Score:</strong> {s.scoreMy} – {s.scoreOpp}
+    <div style={{ padding: '1rem' }}>
+      <h1>Live Match</h1>
+      <div style={{ fontSize: '1.2rem', marginBottom: '1rem' }}>
+        Score: {s.scoreMy} - {s.scoreOpp}
       </div>
 
-      <div style={{ marginBottom: 12 }}>
-        <button onClick={addMy} style={{ marginRight: 8 }}>
-          +1 My Team
-        </button>
-        <button onClick={addOpp} style={{ marginRight: 8 }}>
-          +1 Opponent
-        </button>
-        <button onClick={reset}>Reset Set</button>
+      <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
+        <button onClick={addMy}>+1 My Team</button>
+        <button onClick={addOpp}>+1 Opponent</button>
       </div>
 
-      <div style={{ marginBottom: 12 }}>
-        <strong>Real Points:</strong> {s.realMy} – {s.realOpp}
-      </div>
-
-      <div style={{ marginBottom: 12 }}>
-        <strong>Rotations:</strong> My {s.rotMy} | Opp {s.rotOpp}
-      </div>
-
-      <div style={{ marginBottom: 12 }}>
-        <strong>Win Chance Now:</strong> {(chance.now * 100).toFixed(1)}%
-      </div>
-      <div style={{ marginBottom: 12 }}>
-        <strong>If My Team Wins Next Rally:</strong>{' '}
-        {(chance.pIfWin * 100).toFixed(1)}%
-      </div>
-      <div style={{ marginBottom: 12 }}>
-        <strong>If Opponent Wins Next Rally:</strong>{' '}
-        {(chance.pIfLose * 100).toFixed(1)}%
+      <div style={{ marginBottom: '1rem' }}>
+        <strong>Win Chance Now:</strong> {(chance.now * 100).toFixed(1)}%<br />
+        <strong>If Next Rally Win:</strong> {(chance.deltaWin * 100).toFixed(1)}%<br />
+        <strong>If Next Rally Lose:</strong> {(chance.deltaLose * 100).toFixed(1)}%
       </div>
 
       <Link href="/summary">Go to Summary</Link>
